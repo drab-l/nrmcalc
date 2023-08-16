@@ -3,6 +3,7 @@
 mod numeric;
 
 // Syntax
+// top_exp : eql_exp
 // eql_exp : rel_exp
 //           eql_exp [==,!=] rel_exp
 // rel_exp : add_sub
@@ -12,7 +13,7 @@ mod numeric;
 // mul_div : par_exp
 //           mul_div [*,/] pa_exp
 // par_exp : numeric
-//           (add_sub)
+//           (top_exp)
 // numeric : hexs
 //           octs
 //           digs
@@ -100,7 +101,7 @@ fn skip_delim(buf: &[u8]) -> (&[u8], usize) {
     (&buf[s..], s)
 }
 
-fn root_exp(buf: &[u8]) -> Option<(i64, usize)> {
+fn top_exp(buf: &[u8]) -> Option<(i64, usize)> {
     eql_exp(buf)
 }
 
@@ -211,7 +212,7 @@ fn mul_div_rv(lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
 fn par_exp(buf: &[u8]) -> Option<(i64, usize)> {
     let (buf, skip) = skip_delim(buf);
     if is_lpar_token(buf) {
-        let (v, s) = root_exp(&buf[1..])?;
+        let (v, s) = top_exp(&buf[1..])?;
         let (buf, skip2) = skip_delim(&buf[1 + s..]);
         if is_rpar_token(buf) {
             Some((v, s + skip + skip2 + LPAR.len() + RPAR.len()))
@@ -252,7 +253,7 @@ fn numeric_ltrimed(buf: &[u8]) -> Option<(i64, usize)> {
 /// # Arguments
 /// * `buf` - ascii string bufer
 pub fn calc(buf: &str) -> Option<i64> {
-    let (v, s) = root_exp(buf.as_bytes())?;
+    let (v, s) = top_exp(buf.as_bytes())?;
     if buf.len() == s {
         Some(v)
     } else {
