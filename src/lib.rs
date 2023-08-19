@@ -17,14 +17,17 @@ use operator::*;
 //           rel_exp [<,>,<=,>=] add_sub
 // add_sub : mul_div
 //           add_sub [+,-] mul_div
-// mul_div : par_exp
-//           mul_div [*,/] pa_exp
+// mul_div : custom1
+//           mul_div [*,/] custom1
 // par_exp : numeric
 //           (top_exp)
 // numeric : hexs
 //           octs
 //           digs
 //           var_exp
+//
+// custom1 : par_exp
+//         : custom1 [@[A-Za-z]..] par_exp
 
 #[allow(unused_macros)]
 macro_rules! LINE { () => { println!("{}", line!()) } }
@@ -42,7 +45,7 @@ fn skip_delim(buf: &[u8]) -> (&[u8], usize) {
     (&buf[s..], s)
 }
 
-impl Calc {
+impl<'a> Calc<'a> {
     fn top_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
         self.asn_exp(buf)
     }
@@ -67,7 +70,7 @@ impl Calc {
             self.var.insert(var.to_string(), v);
         } else {
             let Some(var) = self.var.get_mut(var) else {
-                return None;
+                return None
             };
             if is_add_assign_token(b) {
                 *var += v;
@@ -161,7 +164,7 @@ impl Calc {
     }
 
     fn mul_div(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
-        let (lv, ls) = self.par_exp(buf)?;
+        let (lv, ls) = self.custom1(buf)?;
         let (v, s) = self.mul_div_rv(lv, 0, &buf[ls..])?;
         Some((v, s + ls))
     }
@@ -171,7 +174,7 @@ impl Calc {
         if buf.len() == 0 {
             Some((lv, ls + skip))
         } else if is_mul_token(buf) || is_div_token(buf) {
-            let (rv, rs) = self.par_exp(&buf[1..])?;
+            let (rv, rs) = self.custom1(&buf[1..])?;
             let s = ls + rs + skip + 1;
             let v = if is_mul_token(buf) {
                 lv.wrapping_mul(rv)
@@ -184,6 +187,26 @@ impl Calc {
         } else {
             Some((lv, ls + skip))
         }
+    }
+
+    fn custom1(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
+        let (lv, ls) = self.par_exp(buf)?;
+        let (v, s) = self.custom1_rv(lv, 0, &buf[ls..])?;
+        Some((v, s + ls))
+    }
+
+    fn custom1_rv(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
+        let (b, skip) = skip_delim(&buf);
+        if b.len() == 0 {
+            return Some((lv, ls + skip))
+        }
+        let Some((var, skip2)) = try_get_custom1(b) else {
+            return Some((lv, ls + skip))
+        };
+        let b = &b[skip2..];
+        let (rv, rs) = self.par_exp(b)?;
+        let v = (self.custom1.get_mut(var)?)(lv, rv)?;
+        Some((v, ls + rs + skip + skip2))
     }
 
     fn par_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -229,7 +252,13 @@ impl Calc {
     }
 
     pub fn new() -> Self {
-        Self { var: HashMap::<String, i64>::new() }
+        Self { var: HashMap::<String, i64>::new() , custom1: HashMap::new() }
+    }
+
+    pub fn set_custom1_cb<T>(&mut self, key: &str, cb: T)
+        where T: FnMut(i64, i64) -> Option<i64> + 'a
+    {
+        self.custom1.insert(key.to_string(), Box::<T>::new(cb));
     }
 
     /// Calculate expression
@@ -245,8 +274,9 @@ impl Calc {
     }
 }
 
-pub struct Calc {
+pub struct Calc<'a> {
     var: HashMap<String, i64>,
+    custom1: HashMap<String, Box<dyn 'a + FnMut(i64, i64) -> Option<i64>>>,
 }
 
 /// Calculate expression
@@ -347,5 +377,18 @@ mod tests {
         let mut c = Calc::new();
         assert_eq!(c.calc("a = 1").unwrap(), 1);
         assert_eq!(c.calc("a += 2").unwrap(), 3);
+    }
+    #[test]
+    fn test_custom1() {
+        let mut s = 0;
+        let mut c = Calc::new();
+        c.set_custom1_cb("asd", move |lv, rv|{s = s + 1; Some(lv + rv + s)});
+        c.set_custom1_cb("_", move |lv, rv|{s = s + 1; Some(lv + rv + s)});
+        assert_eq!(c.calc("1 @asd 1").unwrap(), 3);
+        assert_eq!(c.calc("1 @asd 1").unwrap(), 4);
+        assert_eq!(c.calc("1 + 1 @asd 1 + 1").unwrap(), 7);
+        assert_eq!(c.calc("1 _asd 1"), None);
+        assert_eq!(c.calc("1 @asdf 1"), None);
+        assert_eq!(c.calc("1 @_ 1"), None);
     }
 }
