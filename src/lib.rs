@@ -22,14 +22,14 @@ use operator::*;
 // par_exp : sqr_bra
 //           (top_exp)
 // sqr_bra : numeric
-//           [top_exp]
+//           [[ ,@[[0-9A-Za-z]...]] top_exp]
 // numeric : hexs
 //           octs
 //           digs
 //           var_exp
 //
 // custom1 : par_exp
-//         : custom1 [@[A-Za-z]..] par_exp
+//         : custom1 [@[ ,[0-9A-Za-z]..]] par_exp
 
 #[allow(unused_macros)]
 macro_rules! LINE { () => { println!("{}", line!()) } }
@@ -228,19 +228,18 @@ impl<'a> Calc<'a> {
     }
 
     fn sqr_bra(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
-        let (buf, skip) = skip_delim(buf);
-        if is_lsqr_token(buf) {
-            let (v, s) = self.top_exp(&buf[LSQR.len()..])?;
-            let (buf, skip2) = skip_delim(&buf[LSQR.len() + s..]);
-            if is_rsqr_token(buf) {
-                let v = (self.sqr_bra.as_mut()?)(v)?;
-                Some((v, s + skip + skip2 + LPAR.len() + RPAR.len()))
-            } else {
-                None
-            }
+        let (b, skip) = skip_delim(buf);
+        let Some((var, skip2)) = try_get_sqr_bra(b) else {
+            let (v, s) = self.numeric(b)?;
+            return Some((v, s + skip))
+        };
+        let (v, s) = self.top_exp(&b[skip2..])?;
+        let (b, skip3) = skip_delim(&b[skip2 + s..]);
+        if is_rsqr_token(b) {
+            let v = (self.sqr_bra.get_mut(var)?)(v)?;
+            Some((v, s + skip + skip2 + skip3 + RPAR.len()))
         } else {
-            let (v, s) = self.numeric(buf)?;
-            Some((v, s + skip))
+            None
         }
     }
 
@@ -271,7 +270,7 @@ impl<'a> Calc<'a> {
     }
 
     pub fn new() -> Self {
-        Self { var: HashMap::new(), custom1: HashMap::new(), sqr_bra: None }
+        Self { var: HashMap::new(), custom1: HashMap::new(), sqr_bra: HashMap::new() }
     }
 
     pub fn set_custom1_cb<T>(&mut self, key: &str, cb: T)
@@ -280,10 +279,10 @@ impl<'a> Calc<'a> {
         self.custom1.insert(key.to_string(), Box::<T>::new(cb));
     }
 
-    pub fn set_sqr_bra_cb<T>(&mut self, cb: T)
+    pub fn set_sqr_bra_cb<T>(&mut self, key: &str, cb: T)
         where T: FnMut(i64) -> Option<i64> + 'a
     {
-        self.sqr_bra = Some(Box::<T>::new(cb));
+        self.sqr_bra.insert(key.to_string(), Box::<T>::new(cb));
     }
 
     /// Calculate expression
@@ -302,7 +301,7 @@ impl<'a> Calc<'a> {
 pub struct Calc<'a> {
     var: HashMap<String, i64>,
     custom1: HashMap<String, Box<dyn 'a + FnMut(i64, i64) -> Option<i64>>>,
-    sqr_bra: Option<Box<dyn 'a + FnMut(i64) -> Option<i64>>>,
+    sqr_bra: HashMap<String, Box<dyn 'a + FnMut(i64) -> Option<i64>>>,
 }
 
 /// Calculate expression
@@ -421,17 +420,23 @@ mod tests {
         let mut s = 0;
         c.set_custom1_cb("asd", move |lv, rv|{s = s + 1; assert_eq!(s, lv);Some(lv * rv)});
         assert_eq!(c.calc("1 @asd 2 @asd 3").unwrap(), 6);
+        c.set_custom1_cb("", move |lv, rv|{Some(lv + rv + 1)});
+        assert_eq!(c.calc("1 @ 1").unwrap(), 3);
     }
     #[test]
     fn test_sqr_bra() {
         let mut s = 0;
         let mut c = Calc::new();
-        assert_eq!(c.calc("[1]"), None);
-        c.set_sqr_bra_cb(move |v|{s = s + 1; Some(v + s)});
-        assert_eq!(c.calc("[1]").unwrap(), 2);
-        assert_eq!(c.calc("[[1]]").unwrap(), 6);
+        assert_eq!(c.calc("[@1 1]"), None);
+        c.set_sqr_bra_cb("1", move |v|{s = s + 1; Some(v + s)});
+        assert_eq!(c.calc("[@2 1]"), None);
+        assert_eq!(c.calc("[@1 1]").unwrap(), 2);
+        assert_eq!(c.calc("[@1[@1 1]]").unwrap(), 6);
         let mut s = 0;
-        c.set_sqr_bra_cb(move |v|{s = s + 1; Some(v + s)});
-        assert_eq!(c.calc("[0] * 1 + [0] * 2").unwrap(), 5);
+        c.set_sqr_bra_cb("1", move |v|{s = s + 1; Some(v + s)});
+        assert_eq!(c.calc("[@1 0] * 1 + [@1 0] * 2").unwrap(), 5);
+        c.set_sqr_bra_cb("", move |v|{Some(v * 2)});
+        assert_eq!(c.calc("[@ 1]").unwrap(), 2);
+        assert_eq!(c.calc("[2]").unwrap(), 4);
     }
 }
