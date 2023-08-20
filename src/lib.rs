@@ -206,7 +206,7 @@ impl<'a> Calc<'a> {
         let b = &b[skip2..];
         let (rv, rs) = self.par_exp(b)?;
         let v = (self.custom1.get_mut(var)?)(lv, rv)?;
-        Some((v, ls + rs + skip + skip2))
+        self.custom1_rv(v, ls + rs + skip + skip2, &b[rs..])
     }
 
     fn par_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -390,5 +390,10 @@ mod tests {
         assert_eq!(c.calc("1 _asd 1"), None);
         assert_eq!(c.calc("1 @asdf 1"), None);
         assert_eq!(c.calc("1 @_ 1"), None);
+        c.set_custom1_cb("asd", move |lv, rv|{Some(lv * rv)});
+        assert_eq!(c.calc("3 @asd 1 + 1").unwrap(), 4);
+        let mut s = 0;
+        c.set_custom1_cb("asd", move |lv, rv|{s = s + 1; assert_eq!(s, lv);Some(lv * rv)});
+        assert_eq!(c.calc("1 @asd 2 @asd 3").unwrap(), 6);
     }
 }
