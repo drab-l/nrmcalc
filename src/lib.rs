@@ -19,8 +19,10 @@ use operator::*;
 //           add_sub [+,-] mul_div
 // mul_div : custom1
 //           mul_div [*,/] custom1
-// par_exp : numeric
+// par_exp : sqr_bra
 //           (top_exp)
+// sqr_bra : numeric
+//           [top_exp]
 // numeric : hexs
 //           octs
 //           digs
@@ -212,9 +214,26 @@ impl<'a> Calc<'a> {
     fn par_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
         let (buf, skip) = skip_delim(buf);
         if is_lpar_token(buf) {
-            let (v, s) = self.top_exp(&buf[1..])?;
-            let (buf, skip2) = skip_delim(&buf[1 + s..]);
+            let (v, s) = self.top_exp(&buf[LPAR.len()..])?;
+            let (buf, skip2) = skip_delim(&buf[LPAR.len() + s..]);
             if is_rpar_token(buf) {
+                Some((v, s + skip + skip2 + LPAR.len() + RPAR.len()))
+            } else {
+                None
+            }
+        } else {
+            let (v, s) = self.sqr_bra(buf)?;
+            Some((v, s + skip))
+        }
+    }
+
+    fn sqr_bra(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
+        let (buf, skip) = skip_delim(buf);
+        if is_lsqr_token(buf) {
+            let (v, s) = self.top_exp(&buf[LSQR.len()..])?;
+            let (buf, skip2) = skip_delim(&buf[LSQR.len() + s..]);
+            if is_rsqr_token(buf) {
+                let v = (self.sqr_bra.as_mut()?)(v)?;
                 Some((v, s + skip + skip2 + LPAR.len() + RPAR.len()))
             } else {
                 None
@@ -252,13 +271,19 @@ impl<'a> Calc<'a> {
     }
 
     pub fn new() -> Self {
-        Self { var: HashMap::<String, i64>::new() , custom1: HashMap::new() }
+        Self { var: HashMap::new(), custom1: HashMap::new(), sqr_bra: None }
     }
 
     pub fn set_custom1_cb<T>(&mut self, key: &str, cb: T)
         where T: FnMut(i64, i64) -> Option<i64> + 'a
     {
         self.custom1.insert(key.to_string(), Box::<T>::new(cb));
+    }
+
+    pub fn set_sqr_bra_cb<T>(&mut self, cb: T)
+        where T: FnMut(i64) -> Option<i64> + 'a
+    {
+        self.sqr_bra = Some(Box::<T>::new(cb));
     }
 
     /// Calculate expression
@@ -277,6 +302,7 @@ impl<'a> Calc<'a> {
 pub struct Calc<'a> {
     var: HashMap<String, i64>,
     custom1: HashMap<String, Box<dyn 'a + FnMut(i64, i64) -> Option<i64>>>,
+    sqr_bra: Option<Box<dyn 'a + FnMut(i64) -> Option<i64>>>,
 }
 
 /// Calculate expression
@@ -395,5 +421,17 @@ mod tests {
         let mut s = 0;
         c.set_custom1_cb("asd", move |lv, rv|{s = s + 1; assert_eq!(s, lv);Some(lv * rv)});
         assert_eq!(c.calc("1 @asd 2 @asd 3").unwrap(), 6);
+    }
+    #[test]
+    fn test_sqr_bra() {
+        let mut s = 0;
+        let mut c = Calc::new();
+        assert_eq!(c.calc("[1]"), None);
+        c.set_sqr_bra_cb(move |v|{s = s + 1; Some(v + s)});
+        assert_eq!(c.calc("[1]").unwrap(), 2);
+        assert_eq!(c.calc("[[1]]").unwrap(), 6);
+        let mut s = 0;
+        c.set_sqr_bra_cb(move |v|{s = s + 1; Some(v + s)});
+        assert_eq!(c.calc("[0] * 1 + [0] * 2").unwrap(), 5);
     }
 }
