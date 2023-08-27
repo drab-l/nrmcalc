@@ -66,8 +66,8 @@ impl<'a> Calc<'a> {
             // maybe var_exp as numeric
             return self.eql_exp(buf)
         }
-        let skip4 = if is_cmn_assign_token(b) { 1 } else { 2 };
-        let (v, s) = self.asn_exp(&b[skip4..])?;
+        let skip4 = if is_cmn_assign_token(b) { CMN_ASSIGN.len() } else { ADD_ASSIGN.len() };
+        let (v, skip5) = self.asn_exp(&b[skip4..])?;
         if is_cmn_assign_token(b) {
             self.var.insert(var.to_string(), v);
         } else {
@@ -84,7 +84,7 @@ impl<'a> Calc<'a> {
                 *var /= v;
             }
         }
-        Some((*self.var.get(var)?, skip + skip2 + skip3 + skip4 + s))
+        Some((*self.var.get(var)?, skip + skip2 + skip3 + skip4 + skip5))
     }
 
     fn eql_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -95,21 +95,17 @@ impl<'a> Calc<'a> {
 
     fn eql_exp_rv(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
         let (buf, skip) = skip_delim(&buf);
-        if buf.len() == 0 {
-            Some((lv, ls + skip))
-        } else if is_eq_token(buf) || is_ne_token(buf) {
-            let skip2 = 2;
-            let (rv, rs) = self.rel_exp(&buf[skip2..])?;
-            let s = ls + rs + skip + skip2;
-            let v = if is_eq_token(buf) {
-                lv == rv
-            } else {
-                lv != rv
-            } as i64;
-            self.eql_exp_rv(v, s, &buf[skip2 + rs..])
-        } else {
-            Some((lv, ls + skip))
+        if buf.len() == 0 || !(is_eq_token(buf) || is_ne_token(buf)) {
+            return Some((lv, ls + skip))
         }
+        let skip2 = EQ.len();
+        let (rv, rs) = self.rel_exp(&buf[skip2..])?;
+        let v = if is_eq_token(buf) {
+            lv == rv
+        } else {
+            lv != rv
+        } as i64;
+        self.eql_exp_rv(v, ls + rs + skip + skip2, &buf[skip2 + rs..])
     }
 
     fn rel_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -120,25 +116,21 @@ impl<'a> Calc<'a> {
 
     fn rel_exp_rv(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
         let (buf, skip) = skip_delim(&buf);
-        if buf.len() == 0 {
-            Some((lv, ls + skip))
-        } else if is_gt_token(buf) || is_lt_token(buf) || is_ge_token(buf) || is_le_token(buf) {
-            let skip2 = if is_gt_token(buf) || is_lt_token(buf) { 1 } else { 2 };
-            let (rv, rs) = self.add_sub(&buf[skip2..])?;
-            let s = ls + rs + skip + skip2;
-            let v = if is_gt_token(buf) {
-                lv > rv
-            } else if is_lt_token(buf) {
-                lv < rv
-            } else if is_ge_token(buf) {
-                lv >= rv
-            } else {
-                lv <= rv
-            } as i64;
-            self.rel_exp_rv(v, s, &buf[skip2 + rs..])
-        } else {
-            Some((lv, ls + skip))
+        if buf.len() == 0 || !(is_gt_token(buf) || is_lt_token(buf) || is_ge_token(buf) || is_le_token(buf)) {
+            return Some((lv, ls + skip))
         }
+        let skip2 = if is_gt_token(buf) || is_lt_token(buf) { GT.len() } else { GE.len() };
+        let (rv, rs) = self.add_sub(&buf[skip2..])?;
+        let v = if is_gt_token(buf) {
+            lv > rv
+        } else if is_lt_token(buf) {
+            lv < rv
+        } else if is_ge_token(buf) {
+            lv >= rv
+        } else {
+            lv <= rv
+        } as i64;
+        self.rel_exp_rv(v, ls + rs + skip + skip2, &buf[skip2 + rs..])
     }
 
     fn add_sub(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -149,20 +141,17 @@ impl<'a> Calc<'a> {
 
     fn add_sub_rv(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
         let (buf, skip) = skip_delim(&buf);
-        if buf.len() == 0 {
-            Some((lv, ls + skip))
-        } else if is_add_token(buf) || is_sub_token(buf) {
-            let (rv, rs) = self.mul_div(&buf[1..])?;
-            let s = ls + rs + skip + 1;
-            let v = if is_add_token(buf) {
-                lv.wrapping_add(rv)
-            } else {
-                lv.wrapping_sub(rv)
-            };
-            self.add_sub_rv(v, s, &buf[1 + rs..])
-        } else {
-            Some((lv, ls + skip))
+        if buf.len() == 0 || !(is_add_token(buf) || is_sub_token(buf)) {
+            return Some((lv, ls + skip))
         }
+        let skip2 = ADD.len();
+        let (rv, rs) = self.mul_div(&buf[skip2..])?;
+        let v = if is_add_token(buf) {
+            lv.wrapping_add(rv)
+        } else {
+            lv.wrapping_sub(rv)
+        };
+        self.add_sub_rv(v, ls + rs + skip + skip2, &buf[rs + skip2..])
     }
 
     fn mul_div(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -173,22 +162,19 @@ impl<'a> Calc<'a> {
 
     fn mul_div_rv(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
         let (buf, skip) = skip_delim(&buf);
-        if buf.len() == 0 {
-            Some((lv, ls + skip))
-        } else if is_mul_token(buf) || is_div_token(buf) {
-            let (rv, rs) = self.custom1(&buf[1..])?;
-            let s = ls + rs + skip + 1;
-            let v = if is_mul_token(buf) {
-                lv.wrapping_mul(rv)
-            } else if rv != 0 {
-                lv.wrapping_div(rv)
-            } else {
-                return None
-            };
-            self.mul_div_rv(v, s, &buf[1 + rs..])
-        } else {
-            Some((lv, ls + skip))
+        if buf.len() == 0 || !(is_mul_token(buf) || is_div_token(buf)) {
+            return Some((lv, ls + skip))
         }
+        let skip2 = MUL.len();
+        let (rv, rs) = self.custom1(&buf[skip2..])?;
+        let v = if is_mul_token(buf) {
+            lv.wrapping_mul(rv)
+        } else if rv != 0 {
+            lv.wrapping_div(rv)
+        } else {
+            return None
+        };
+        self.mul_div_rv(v, ls + rs + skip + skip2, &buf[rs + skip2..])
     }
 
     fn custom1(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -198,17 +184,17 @@ impl<'a> Calc<'a> {
     }
 
     fn custom1_rv(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
-        let (b, skip) = skip_delim(&buf);
-        if b.len() == 0 {
+        let (buf, skip) = skip_delim(&buf);
+        if buf.len() == 0 {
             return Some((lv, ls + skip))
         }
-        let Some((var, skip2)) = try_get_custom1(b) else {
+        let Some((var, skip2)) = try_get_custom1(buf) else {
             return Some((lv, ls + skip))
         };
-        let b = &b[skip2..];
-        let (rv, rs) = self.par_exp(b)?;
+        let buf = &buf[skip2..];
+        let (rv, rs) = self.par_exp(buf)?;
         let v = (self.custom1.get_mut(var)?)(lv, rv)?;
-        self.custom1_rv(v, ls + rs + skip + skip2, &b[rs..])
+        self.custom1_rv(v, ls + rs + skip + skip2, &buf[rs..])
     }
 
     fn par_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
@@ -228,14 +214,14 @@ impl<'a> Calc<'a> {
     }
 
     fn sqr_bra(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
-        let (b, skip) = skip_delim(buf);
-        let Some((var, skip2)) = try_get_sqr_bra(b) else {
-            let (v, s) = self.numeric(b)?;
+        let (buf, skip) = skip_delim(buf);
+        let Some((var, skip2)) = try_get_sqr_bra(buf) else {
+            let (v, s) = self.numeric(buf)?;
             return Some((v, s + skip))
         };
-        let (v, s) = self.top_exp(&b[skip2..])?;
-        let (b, skip3) = skip_delim(&b[skip2 + s..]);
-        if is_rsqr_token(b) {
+        let (v, s) = self.top_exp(&buf[skip2..])?;
+        let (buf, skip3) = skip_delim(&buf[skip2 + s..]);
+        if is_rsqr_token(buf) {
             let v = (self.sqr_bra.get_mut(var)?)(v)?;
             Some((v, s + skip + skip2 + skip3 + RPAR.len()))
         } else {

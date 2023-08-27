@@ -138,10 +138,6 @@ pub fn try_get_sqr_bra(buf: &[u8]) -> Option<(&str, usize)> {
     }
 }
 
-pub fn is_lsqr_token(buf: &[u8]) -> bool {
-    buf.starts_with(&LSQR)
-}
-
 pub fn is_rsqr_token(buf: &[u8]) -> bool {
     buf.starts_with(&RSQR)
 }
