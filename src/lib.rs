@@ -8,9 +8,15 @@ use operator::*;
 
 // Syntax
 // top_exp : asn_exp
-// asn_exp : eql_exp
-//           var_exp [=,+=,-=,*=,/=] asn_exp
+// asn_exp : and_exp
+//           var_exp [=,+=,-=,*=,/=,&=,^=,|=] asn_exp
 // var_exp : A-Za-z...
+// and_exp : xor_exp
+//           and_exp & xor_exp
+// xor_exp : ior_exp
+//           xor_exp ^ ior_exp
+// ior_exp : eql_exp
+//           ior_exp | eql_exp
 // eql_exp : rel_exp
 //           eql_exp [==,!=] rel_exp
 // rel_exp : add_sub
@@ -47,6 +53,26 @@ fn skip_delim(buf: &[u8]) -> (&[u8], usize) {
     (&buf[s..], s)
 }
 
+macro_rules! bitwise_func {
+    ($op:tt, $op_lt:ident, $is_op:ident, $func:ident, $rv_func:ident, $next_func:ident) => {
+        fn $func(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
+            let (lv, ls) = self.$next_func(buf)?;
+            let (v, s) = self.$rv_func(lv, 0, &buf[ls..])?;
+            Some((v, s + ls))
+        }
+
+        fn $rv_func(&mut self, lv: i64, ls:usize, buf: &[u8]) -> Option<(i64, usize)> {
+            let (buf, skip) = skip_delim(&buf);
+            if buf.len() == 0 || !$is_op(buf) {
+                return Some((lv, ls + skip))
+            }
+            let skip2 = $op_lt.len();
+            let (rv, rs) = self.$next_func(&buf[skip2..])?;
+            self.$rv_func(lv $op rv, ls + rs + skip + skip2, &buf[skip2 + rs..])
+        }
+    };
+}
+
 impl<'a> Calc<'a> {
     fn top_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
         self.asn_exp(buf)
@@ -58,13 +84,13 @@ impl<'a> Calc<'a> {
             return None
         }
         let Some((var, skip2)) = try_get_var_exp(b) else {
-            return self.eql_exp(buf)
+            return self.and_exp(buf)
         };
         let b = &b[skip2..];
         let (b, skip3) = skip_delim(&b);
         if !is_assign_token(b) {
             // maybe var_exp as numeric
-            return self.eql_exp(buf)
+            return self.and_exp(buf)
         }
         let skip4 = if is_cmn_assign_token(b) { CMN_ASSIGN.len() } else { ADD_ASSIGN.len() };
         let (v, skip5) = self.asn_exp(&b[skip4..])?;
@@ -80,12 +106,24 @@ impl<'a> Calc<'a> {
                 *var -= v;
             } else if is_mul_assign_token(b) {
                 *var *= v;
-            } else {
+            } else if is_div_assign_token(b) {
                 *var /= v;
+            } else if is_and_assign_token(b) {
+                *var &= v;
+            } else if is_xor_assign_token(b) {
+                *var ^= v;
+            } else if is_ior_assign_token(b) {
+                *var |= v;
+            } else {
+                return None
             }
         }
         Some((*self.var.get(var)?, skip + skip2 + skip3 + skip4 + skip5))
     }
+
+    bitwise_func!(&, AND, is_and_token, and_exp, and_exp_rv, xor_exp);
+    bitwise_func!(^, XOR, is_xor_token, xor_exp, xor_exp_rv, ior_exp);
+    bitwise_func!(|, IOR, is_ior_token, ior_exp, ior_exp_rv, eql_exp);
 
     fn eql_exp(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
         let (lv, ls) = self.rel_exp(buf)?;
@@ -372,6 +410,24 @@ mod tests {
         assert_eq!(calc(" 12 == 3*4").unwrap(), 1);
     }
     #[test]
+    fn test_and_exp() {
+        assert_eq!(calc(" 1 & 1 ").unwrap(), 1);
+        assert_eq!(calc(" 2 & 1 ").unwrap(), 0);
+        assert_eq!(calc(" 8-1 & 4-1 ").unwrap(), 3);
+    }
+    #[test]
+    fn test_xor_exp() {
+        assert_eq!(calc(" 1 ^ 1 ").unwrap(), 1 ^ 1);
+        assert_eq!(calc(" 2 ^ 1 ").unwrap(), 2 ^ 1);
+        assert_eq!(calc(" 8-1 ^ 4-1 ").unwrap(), 8-1 ^ 4-1);
+    }
+    #[test]
+    fn test_ior_exp() {
+        assert_eq!(calc(" 1 | 1 ").unwrap(), 1 | 1);
+        assert_eq!(calc(" 2 | 1 ").unwrap(), 2 | 1);
+        assert_eq!(calc(" 8-1 | 4-1 ").unwrap(), 8-1 | 4-1);
+    }
+    #[test]
     fn test_asn_exp() {
         assert_eq!(calc("a@ = 2"), None);
         assert_eq!(calc("a = 1").unwrap(), 1);
@@ -382,6 +438,9 @@ mod tests {
         assert_eq!(calc("((a = 2) + (b = 3)) * 0 + (a -= b)").unwrap(), -1);
         assert_eq!(calc("((a = 2) + (b = 3)) * 0 + (a *= b)").unwrap(), 6);
         assert_eq!(calc("(a = b = 3) * 0 + (a /= b)").unwrap(), 1);
+        assert_eq!(calc("((a = 8-1) + (a &= 8+4-1)) * 0 + a").unwrap(), 8-1 & 8+4-1);
+        assert_eq!(calc("((a = 8-1) + (a ^= 8+4-1)) * 0 + a").unwrap(), 8-1 ^ 8+4-1);
+        assert_eq!(calc("((a = 8-1) + (a |= 8+4-1)) * 0 + a").unwrap(), 8-1 | 8+4-1);
     }
     #[test]
     fn test_ctx_asn_exp() {
