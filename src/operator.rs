@@ -138,7 +138,7 @@ fn is_alnum(c: u8) -> bool {
     (c >= '0' as u8 && c <= '9' as u8) || (c >= 'A' as u8 && c <= 'Z' as u8) || (c >= 'a' as u8 && c <= 'z' as u8)
 }
 
-pub fn try_get_var_exp(buf: &[u8]) -> Option<(&str, usize)> {
+pub fn try_get_alphabet_name(buf: &[u8]) -> Option<(&str, usize)> {
     let o = buf.iter().position(|x| !is_alphabet(*x)).unwrap_or(buf.len());
     if o == 0 {
         None
@@ -147,17 +147,28 @@ pub fn try_get_var_exp(buf: &[u8]) -> Option<(&str, usize)> {
     }
 }
 
+pub fn try_get_alnum_name(buf: &[u8]) -> Option<(&str, usize)> {
+    let o = buf.iter().position(|x| !is_alnum(*x)).unwrap_or(buf.len());
+    if o == 0 {
+        None
+    } else {
+        Some((std::str::from_utf8(&buf[..o]).ok()?, o))
+    }
+}
+
+pub fn try_get_var_exp(buf: &[u8]) -> Option<(&str, usize)> {
+    try_get_alphabet_name(buf)
+}
+
 pub fn try_get_custom1(buf: &[u8]) -> Option<(&str, usize)> {
     if buf.len() == 0 || !buf.starts_with(&CUSTOM1) {
         return None
     }
     let buf = &buf[CUSTOM1.len()..];
-    let o = buf.iter().position(|x| !is_alnum(*x)).unwrap_or(buf.len());
-    if o == 0 {
-        Some(("", CUSTOM1.len()))
-    } else {
-        Some((std::str::from_utf8(&buf[..o]).ok()?, CUSTOM1.len() + o))
-    }
+    let Some((n, s)) = try_get_alnum_name(buf) else {
+        return Some(("", CUSTOM1.len()))
+    };
+    Some((n, CUSTOM1.len() + s))
 }
 
 pub fn try_get_sqr_bra(buf: &[u8]) -> Option<(&str, usize)> {
@@ -170,6 +181,10 @@ pub fn try_get_sqr_bra(buf: &[u8]) -> Option<(&str, usize)> {
     } else {
         Some(("", LSQR.len()))
     }
+}
+
+pub fn try_get_cmd_name(buf: &[u8]) -> Option<(&str, usize)> {
+    try_get_alnum_name(buf)
 }
 
 pub fn is_lsqr_token(buf: &[u8]) -> bool {

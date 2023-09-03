@@ -15,7 +15,7 @@ use cmd::*;
 // top_exp : asn_exp
 // asn_exp : and_exp
 //           var_exp [=,+=,-=,*=,/=,&=,^=,|=] asn_exp
-// var_exp : A-Za-z...
+// var_exp : [A-Za-z]...
 // and_exp : xor_exp
 //           and_exp & xor_exp
 // xor_exp : ior_exp
@@ -40,10 +40,12 @@ use cmd::*;
 //           var_exp
 //
 // custom1 : par_exp
-//         : custom1 [@[ ,[0-9A-Za-z]..]] par_exp
+//         : custom1 [@[ ,[0-9A-Za-z]...]] par_exp
 //
-// cmd     : str[top_exp]
-//           set_str[top_exp]=string
+// cmd     : @[0-9A-Za-z]... # if setted by set_cmd
+//           @set_cmd[[0-9A-Za-z]...]=string
+//           @str[top_exp]
+//           @set_str[top_exp]=string
 
 #[allow(unused_macros)]
 macro_rules! LINE { () => { println!("{}", line!()) } }
@@ -319,14 +321,14 @@ impl<'a> Calc<'a> {
 
     fn cmd_str_set(&mut self, buf: &[u8]) {
         let (buf, _) = skip_delim(buf);
-        if ! is_lsqr_token(buf) {
+        if !is_lsqr_token(buf) {
             return
         }
-        let Some((key, skip)) = self.top_exp(&buf[1..]) else {
+        let Some((key, skip)) = self.top_exp(&buf[LSQR.len()..]) else {
             return
         };
-        let (buf, _) = skip_delim(&buf[1 + skip..]);
-        if ! is_rsqr_assign_token(buf) {
+        let (buf, _) = skip_delim(&buf[LSQR.len() + skip..]);
+        if !is_rsqr_assign_token(buf) {
             return
         }
         let buf = &buf[RSQR_ASSIGN.len()..];
@@ -338,14 +340,14 @@ impl<'a> Calc<'a> {
 
     fn cmd_str_get(&mut self, buf: &[u8]) {
         let (buf, _) = skip_delim(buf);
-        if ! is_lsqr_token(buf) {
+        if !is_lsqr_token(buf) {
             return
         }
-        let Some((v, skip)) = self.top_exp(&buf[1..]) else {
+        let Some((v, skip)) = self.top_exp(&buf[LSQR.len()..]) else {
             return
         };
-        let (buf, _) = skip_delim(&buf[1 + skip..]);
-        if ! is_rsqr_token(buf) {
+        let (buf, _) = skip_delim(&buf[LSQR.len() + skip..]);
+        if !is_rsqr_token(buf) {
             return
         }
         if let Some(v) = self.str.get(&v).as_ref() {
@@ -353,19 +355,52 @@ impl<'a> Calc<'a> {
         }
     }
 
-    fn cmd(&mut self, buf: &[u8]) {
+    fn try_cmd_get_proc(&mut self, buf: &[u8]) -> Option<i64> {
+        let (buf, _) = skip_delim(buf);
+        let Some((key, _)) = try_get_cmd_name(buf) else {
+            return None
+        };
+        let v = self.cmd.get(key)?.to_owned();
+        self.calc_in(&v)
+    }
+
+    fn cmd_set(&mut self, buf: &[u8]) {
+        let (buf, _) = skip_delim(buf);
+        if !is_lsqr_token(buf) {
+            return
+        }
+        let Some((key, skip)) = try_get_cmd_name(&buf[LSQR.len()..]) else {
+            return
+        };
+        let (buf, _) = skip_delim(&buf[LSQR.len() + skip..]);
+        if !is_rsqr_assign_token(buf) {
+            return
+        }
+        let buf = &buf[RSQR_ASSIGN.len()..];
+        self.cmd.insert(key.to_string(), buf.to_vec());
+    }
+
+    fn cmd(&mut self, buf: &[u8]) -> Option<i64> {
         let _  = buf;
-        if is_str_get_token(buf) {
+        if let Some(v) = self.try_cmd_get_proc(buf) {
+            Some(v)
+        } else if is_cmd_set_token(buf) {
+            self.cmd_set(&buf[CMD_SET.len()..]);
+            None
+        } else if is_str_get_token(buf) {
             self.cmd_str_get(&buf[STR_GET.len()..]);
+            None
         } else if is_str_set_token(buf) {
             self.cmd_str_set(&buf[STR_SET.len()..]);
+            None
         } else {
             log!(self, "other");
+            None
         }
     }
 
-    fn try_get_cmd(buf: &str) -> Option<&[u8]> {
-        let (buf, _) = skip_delim(buf.as_bytes());
+    fn try_get_cmd(buf: &[u8]) -> Option<&[u8]> {
+        let (buf, _) = skip_delim(buf);
         if buf.len() != 0 && buf[0] == '@' as u8 {
             Some(&buf[1..])
         } else {
@@ -379,6 +414,7 @@ impl<'a> Calc<'a> {
             custom1: HashMap::new(),
             sqr_bra: HashMap::new(),
             str: HashMap::new(),
+            cmd: HashMap::new(),
             #[cfg(test)]
             log: Vec::new(),
         }
@@ -396,21 +432,23 @@ impl<'a> Calc<'a> {
         self.sqr_bra.insert(key.to_string(), Box::<T>::new(cb));
     }
 
-    /// Calculate expression
-    /// # Arguments
-    /// * `buf` - ascii string bufer
-    pub fn calc(&mut self, buf: &str) -> Option<i64> {
+    fn calc_in(&mut self, buf: &[u8]) -> Option<i64> {
         if let Some(buf) = Self::try_get_cmd(buf) {
-            self.cmd(buf);
-            None
+            self.cmd(buf)
         } else {
-            let (v, s) = self.top_exp(buf.as_bytes())?;
+            let (v, s) = self.top_exp(buf)?;
             if buf.len() == s {
                 Some(v)
             } else {
                 None
             }
         }
+    }
+    /// Calculate expression
+    /// # Arguments
+    /// * `buf` - ascii string bufer
+    pub fn calc(&mut self, buf: &str) -> Option<i64> {
+        self.calc_in(buf.as_bytes())
     }
 }
 
@@ -419,6 +457,7 @@ pub struct Calc<'a> {
     custom1: HashMap<String, Box<dyn 'a + FnMut(i64, i64) -> Option<i64>>>,
     sqr_bra: HashMap<String, Box<dyn 'a + FnMut(i64) -> Option<i64>>>,
     str: HashMap<i64, String>,
+    cmd: HashMap<String, Vec<u8>>,
 #[cfg(test)]
     log: Vec<String>,
 }
@@ -581,6 +620,17 @@ mod tests {
     }
     #[test]
     fn test_cmd() {
+        let mut c = Calc::new();
+        assert_eq!(c.calc("@ss"), None);
+        assert_eq!(c.calc("@set_cmd[ss]=1 + 1 "), None);
+        assert_eq!(c.calc("@ss").unwrap(), 2);
+        assert_eq!(c.calc("@set_cmd[sss]=@set_cmd[ssss]=2+2"), None);
+        assert_eq!(c.calc("@sss"), None);
+        assert_eq!(c.calc("@ssss").unwrap(), 4);
+    }
+
+    #[test]
+    fn test_cmd_str() {
         let mut c = Calc::new();
         assert_eq!(c.calc("@s"), None);
         assert!(c.log.contains(&"other".to_string()));
