@@ -2,11 +2,16 @@
 
 mod numeric;
 mod operator;
+mod cmd;
 
 use std::collections::HashMap;
 use operator::*;
+use cmd::*;
 
 // Syntax
+// calc    : @cmd
+//           top_exp
+
 // top_exp : asn_exp
 // asn_exp : and_exp
 //           var_exp [=,+=,-=,*=,/=,&=,^=,|=] asn_exp
@@ -36,9 +41,28 @@ use operator::*;
 //
 // custom1 : par_exp
 //         : custom1 [@[ ,[0-9A-Za-z]..]] par_exp
+//
+// cmd     : str[top_exp]
+//           set_str[top_exp]=string
 
 #[allow(unused_macros)]
 macro_rules! LINE { () => { println!("{}", line!()) } }
+
+
+macro_rules! log {
+    ($self:ident, $str:expr) => {
+        #[cfg(test)]
+        $self.log.push($str.to_string());
+        #[cfg(not(test))]
+        print!("{}\n", $str);
+    };
+    ($self:ident, $($t:tt)*) => {
+        #[cfg(test)]
+        $self.log.push(format!($($t)*));
+        #[cfg(not(test))]
+        println!($($t)*);
+    };
+}
 
 fn is_space(c: u8) -> bool {
     c <= 0x20 || c >= 0x7F
@@ -261,7 +285,7 @@ impl<'a> Calc<'a> {
         let (buf, skip3) = skip_delim(&buf[skip2 + s..]);
         if is_rsqr_token(buf) {
             let v = (self.sqr_bra.get_mut(var)?)(v)?;
-            Some((v, s + skip + skip2 + skip3 + RPAR.len()))
+            Some((v, s + skip + skip2 + skip3 + RSQR.len()))
         } else {
             None
         }
@@ -293,8 +317,71 @@ impl<'a> Calc<'a> {
         }
     }
 
+    fn cmd_str_set(&mut self, buf: &[u8]) {
+        let (buf, _) = skip_delim(buf);
+        if ! is_lsqr_token(buf) {
+            return
+        }
+        let Some((key, skip)) = self.top_exp(&buf[1..]) else {
+            return
+        };
+        let (buf, _) = skip_delim(&buf[1 + skip..]);
+        if ! is_rsqr_assign_token(buf) {
+            return
+        }
+        let buf = &buf[RSQR_ASSIGN.len()..];
+        let Ok(v) = std::str::from_utf8(buf) else {
+            return
+        };
+        self.str.insert(key, v.to_string());
+    }
+
+    fn cmd_str_get(&mut self, buf: &[u8]) {
+        let (buf, _) = skip_delim(buf);
+        if ! is_lsqr_token(buf) {
+            return
+        }
+        let Some((v, skip)) = self.top_exp(&buf[1..]) else {
+            return
+        };
+        let (buf, _) = skip_delim(&buf[1 + skip..]);
+        if ! is_rsqr_token(buf) {
+            return
+        }
+        if let Some(v) = self.str.get(&v).as_ref() {
+            log!(self, v);
+        }
+    }
+
+    fn cmd(&mut self, buf: &[u8]) {
+        let _  = buf;
+        if is_str_get_token(buf) {
+            self.cmd_str_get(&buf[STR_GET.len()..]);
+        } else if is_str_set_token(buf) {
+            self.cmd_str_set(&buf[STR_SET.len()..]);
+        } else {
+            log!(self, "other");
+        }
+    }
+
+    fn try_get_cmd(buf: &str) -> Option<&[u8]> {
+        let (buf, _) = skip_delim(buf.as_bytes());
+        if buf.len() != 0 && buf[0] == '@' as u8 {
+            Some(&buf[1..])
+        } else {
+            None
+        }
+    }
+
     pub fn new() -> Self {
-        Self { var: HashMap::new(), custom1: HashMap::new(), sqr_bra: HashMap::new() }
+        Self {
+            var: HashMap::new(),
+            custom1: HashMap::new(),
+            sqr_bra: HashMap::new(),
+            str: HashMap::new(),
+            #[cfg(test)]
+            log: Vec::new(),
+        }
     }
 
     pub fn set_custom1_cb<T>(&mut self, key: &str, cb: T)
@@ -313,11 +400,16 @@ impl<'a> Calc<'a> {
     /// # Arguments
     /// * `buf` - ascii string bufer
     pub fn calc(&mut self, buf: &str) -> Option<i64> {
-        let (v, s) = self.top_exp(buf.as_bytes())?;
-        if buf.len() == s {
-            Some(v)
-        } else {
+        if let Some(buf) = Self::try_get_cmd(buf) {
+            self.cmd(buf);
             None
+        } else {
+            let (v, s) = self.top_exp(buf.as_bytes())?;
+            if buf.len() == s {
+                Some(v)
+            } else {
+                None
+            }
         }
     }
 }
@@ -326,6 +418,9 @@ pub struct Calc<'a> {
     var: HashMap<String, i64>,
     custom1: HashMap<String, Box<dyn 'a + FnMut(i64, i64) -> Option<i64>>>,
     sqr_bra: HashMap<String, Box<dyn 'a + FnMut(i64) -> Option<i64>>>,
+    str: HashMap<i64, String>,
+#[cfg(test)]
+    log: Vec<String>,
 }
 
 /// Calculate expression
@@ -483,5 +578,22 @@ mod tests {
         c.set_sqr_bra_cb("", move |v|{Some(v * 2)});
         assert_eq!(c.calc("[@ 1]").unwrap(), 2);
         assert_eq!(c.calc("[2]").unwrap(), 4);
+    }
+    #[test]
+    fn test_cmd() {
+        let mut c = Calc::new();
+        assert_eq!(c.calc("@s"), None);
+        assert!(c.log.contains(&"other".to_string()));
+        c.log.clear();
+        assert_eq!(c.calc("@set_str[1]=set"), None);
+        c.log.clear();
+        assert_eq!(c.calc("@str[1]"), None);
+        assert!(c.log.contains(&"set".to_string()));
+        c.log.clear();
+        assert_eq!(c.calc("@set_str[1 - 1]= test data "), None);
+        c.log.clear();
+        assert_eq!(c.calc("@str[1 - 1]"), None);
+        assert!(c.log.contains(&" test data ".to_string()));
+        c.log.clear();
     }
 }

@@ -29,6 +29,8 @@ pub const CUSTOM1: [u8; 1] = ['@' as u8];
 pub const LSQR: [u8; 1] = ['[' as u8];
 pub const RSQR: [u8; 1] = [']' as u8];
 
+pub const RSQR_ASSIGN: [u8; 2] = [']' as u8, '=' as u8];
+
 pub fn is_add_token(buf: &[u8]) -> bool {
     buf.starts_with(&ADD) && !buf.starts_with(&ADD_ASSIGN)
 }
@@ -170,6 +172,14 @@ pub fn try_get_sqr_bra(buf: &[u8]) -> Option<(&str, usize)> {
     }
 }
 
+pub fn is_lsqr_token(buf: &[u8]) -> bool {
+    buf.starts_with(&LSQR)
+}
+
 pub fn is_rsqr_token(buf: &[u8]) -> bool {
     buf.starts_with(&RSQR)
+}
+
+pub fn is_rsqr_assign_token(buf: &[u8]) -> bool {
+    buf.starts_with(&RSQR_ASSIGN)
 }

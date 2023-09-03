@@ -1,11 +1,13 @@
 use std::io::Write;
 
 fn main() {
+    let mut calc = nrmcalc::Calc::new();
     loop {
         let Some(cmd) = readline() else {
             continue;
         };
-        if let Some(r) = nrmcalc::calc(&cmd) {
+        let cmd = cmd.trim_end_matches(['\r', '\n']);
+        if let Some(r) = calc.calc(&cmd) {
             println!("{}", r);
         }
     }
