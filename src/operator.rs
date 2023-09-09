@@ -25,6 +25,7 @@ pub const AND_ASSIGN: [u8; 2] = ['&' as u8, '=' as u8];
 pub const XOR_ASSIGN: [u8; 2] = ['^' as u8, '=' as u8];
 pub const IOR_ASSIGN: [u8; 2] = ['|' as u8, '=' as u8];
 
+pub const ARG_VAR: [u8; 1] = ['$' as u8];
 pub const CUSTOM1: [u8; 1] = ['@' as u8];
 pub const LSQR: [u8; 1] = ['[' as u8];
 pub const RSQR: [u8; 1] = [']' as u8];
@@ -130,12 +131,16 @@ pub fn is_ior_assign_token(buf: &[u8]) -> bool {
     buf.starts_with(&IOR_ASSIGN)
 }
 
+fn is_numeric(c: u8) -> bool {
+    c >= '0' as u8 && c <= '9' as u8
+}
+
 fn is_alphabet(c: u8) -> bool {
     (c >= 'A' as u8 && c <= 'Z' as u8) || (c >= 'a' as u8 && c <= 'z' as u8)
 }
 
 fn is_alnum(c: u8) -> bool {
-    (c >= '0' as u8 && c <= '9' as u8) || (c >= 'A' as u8 && c <= 'Z' as u8) || (c >= 'a' as u8 && c <= 'z' as u8)
+    is_numeric(c) || is_alphabet(c)
 }
 
 pub fn try_get_alphabet_name(buf: &[u8]) -> Option<(&str, usize)> {
@@ -156,8 +161,28 @@ pub fn try_get_alnum_name(buf: &[u8]) -> Option<(&str, usize)> {
     }
 }
 
+pub fn try_get_numeric_name(buf: &[u8]) -> Option<(&str, usize)> {
+    let o = buf.iter().position(|x| !is_numeric(*x)).unwrap_or(buf.len());
+    if o == 0 {
+        None
+    } else {
+        Some((std::str::from_utf8(&buf[..o]).ok()?, o))
+    }
+}
+
 pub fn try_get_var_exp(buf: &[u8]) -> Option<(&str, usize)> {
     try_get_alphabet_name(buf)
+}
+
+pub fn try_get_arg_var(buf: &[u8]) -> Option<(&str, usize)> {
+    if buf.len() == 0 || !buf.starts_with(&ARG_VAR) {
+        return None
+    }
+    let buf = &buf[ARG_VAR.len()..];
+    let Some((n, s)) = try_get_numeric_name(buf) else {
+        return None
+    };
+    Some((n, ARG_VAR.len() + s))
 }
 
 pub fn try_get_custom1(buf: &[u8]) -> Option<(&str, usize)> {

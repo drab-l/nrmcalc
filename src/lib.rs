@@ -42,7 +42,7 @@ use cmd::*;
 // custom1 : par_exp
 //         : custom1 [@[ ,[0-9A-Za-z]...]] par_exp
 //
-// cmd     : @[0-9A-Za-z]... # if setted by set_cmd
+// cmd     : @[0-9A-Za-z]... [ ,Args...]# if setted by set_cmd
 //           @set_cmd[[0-9A-Za-z]...]=string
 //           @str[top_exp]
 //           @set_str[top_exp]=string
@@ -304,7 +304,15 @@ impl<'a> Calc<'a> {
             None
         } else if let Some((var, skip)) = try_get_var_exp(buf) {
             Some((*self.var.get(var)?, skip))
-        } else if buf.len() < 3 {
+        } else if let Some((var, skip)) = try_get_arg_var(buf) {
+            Some((*self.var.get(var)?, skip))
+        } else {
+            self.numeric_in(buf)
+        }
+    }
+
+    fn numeric_in(&mut self, buf: &[u8]) -> Option<(i64, usize)> {
+        if buf.len() < 3 {
             numeric::idigits(buf)
         } else if buf[0] != '0' as u8 {
             numeric::idigits(buf)
@@ -356,12 +364,36 @@ impl<'a> Calc<'a> {
     }
 
     fn try_cmd_get_proc(&mut self, buf: &[u8]) -> Option<i64> {
+        const VAR_KEY: [&str; 9] = ["1","2","3","4","5","6","7","8","9",];
         let (buf, _) = skip_delim(buf);
-        let Some((key, _)) = try_get_cmd_name(buf) else {
+        let Some((key, skip)) = try_get_cmd_name(buf) else {
             return None
         };
         let v = self.cmd.get(key)?.to_owned();
-        self.calc_in(&v)
+        let s = buf[skip..].split(|x| is_space(*x)).filter(|x| x.len() != 0);
+        let mut old = vec![];
+        let mut new = vec![];
+        for i in 1..9 {
+            let Some(v) = self.var.get(VAR_KEY[i]) else {
+                break
+            };
+            old.push(*v);
+        }
+        for (i, e) in s.enumerate() {
+            if VAR_KEY.len() <= i {
+                break
+            }
+            let (v, _) = self.numeric(e)?;
+            new.push(v);
+        }
+        for (i, e) in new.iter().enumerate() {
+            self.var.insert(VAR_KEY[i].to_string(), *e);
+        }
+        let r = self.calc_in(&v);
+        for (i, e) in old.iter().enumerate() {
+            self.var.insert(VAR_KEY[i].to_string(), *e);
+        }
+        r
     }
 
     fn cmd_set(&mut self, buf: &[u8]) {
@@ -619,7 +651,7 @@ mod tests {
         assert_eq!(c.calc("[2]").unwrap(), 4);
     }
     #[test]
-    fn test_cmd() {
+    fn test_cmd_set() {
         let mut c = Calc::new();
         assert_eq!(c.calc("@ss"), None);
         assert_eq!(c.calc("@set_cmd[ss]=1 + 1 "), None);
@@ -628,7 +660,20 @@ mod tests {
         assert_eq!(c.calc("@sss"), None);
         assert_eq!(c.calc("@ssss").unwrap(), 4);
     }
-
+    #[test]
+    fn test_cmd_arg() {
+        let mut c = Calc::new();
+        assert_eq!(c.calc("@set_cmd[ss]=1 + $1"), None);
+        assert_eq!(c.calc("@ss"), None);
+        assert_eq!(c.calc("@ss 2").unwrap(), 3);
+        assert_eq!(c.calc("@set_cmd[ss]=1 + $1 + $9"), None);
+        assert_eq!(c.calc("@ss 1 2 3 4 5 6 7 8 9").unwrap(), 11);
+        assert_eq!(c.calc("@set_cmd[ss]=1 + $10"), None);
+        assert_eq!(c.calc("@ss 1 2 3 4 5 6 7 8 9 10"), None);
+        assert_eq!(c.calc("@set_cmd[ss]=@sss 4 $1 $2 $3"), None);
+        assert_eq!(c.calc("@set_cmd[sss]=$1 + $2 + $3"), None);
+        assert_eq!(c.calc("@ss 1 2 3").unwrap(), 7);
+    }
     #[test]
     fn test_cmd_str() {
         let mut c = Calc::new();
