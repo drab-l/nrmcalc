@@ -2,11 +2,19 @@ Calculate the given string as expression by calc function.
 
 Supports user definable binary and unary operations.
 
-Binary operation is defined as "left-operant @+alphanumeric "right-operand".
+Binary operation is defined as "left-operant" @+alphanumeric "right-operand".
 Unary operations is "[@+alphanumeric operand]".
 
-The unary operation can omit "@+alphanumeric", in which case it is equivalent to @ only (alphanumeric is an empty string).
+The unary operation can omit "@+alphanumeric", in which case it is equivalent to "@" only(alphanumeric is an empty string).
+
 Binary and unary operations can be defined with set_custom1_cb and set_sqr_bra_cb function, where the first argument is "alphanumeric" string after @ and the second argument is the operation.
+
+Variable names are alphabet characters only.
+Numeric values are supported in decimal, octal (prefix 0o), and hexadecimal (prefix 0x).
+
+It also supports commands apart from expressions.
+It starts with a "@" and any command can be added.
+Up to 9 arguments can be used, each referenced by $1,$2,...,$9.
 
 
 The syntax is follows.
@@ -47,7 +55,7 @@ The syntax is follows.
 		custom1 : par_exp
 		        : custom1 [@[ ,[0-9A-Za-z]...]] par_exp
 
-		cmd     : @[0-9A-Za-z]... [ ,Args...]# if setted by set_cmd
+		cmd     : @[0-9A-Za-z]... [ ,Args...] # if setted by set_cmd
 		          @set_cmd[[0-9A-Za-z]...]=string
 		          @str[top_exp]
 		          @set_str[top_exp]=string
