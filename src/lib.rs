@@ -9,13 +9,14 @@ use operator::*;
 use cmd::*;
 
 // Syntax
-// calc    : @cmd
+// calc    : cmd
 //           top_exp
 
 // top_exp : asn_exp
 // asn_exp : and_exp
 //           var_exp [=,+=,-=,*=,/=,&=,^=,|=] asn_exp
 // var_exp : [A-Za-z]...
+// arg_var : $[1-9]
 // and_exp : xor_exp
 //           and_exp & xor_exp
 // xor_exp : ior_exp
@@ -38,6 +39,7 @@ use cmd::*;
 //           octs
 //           digs
 //           var_exp
+//           arg_var
 //
 // custom1 : par_exp
 //         : custom1 [@[ ,[0-9A-Za-z]...]] par_exp
